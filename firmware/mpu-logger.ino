@@ -41,6 +41,12 @@ void setup() {
 
   Serial.print("mpu-logger");
 
+  // Reset all registers
+  Wire.beginTransmission(0x68);
+  Wire.write(107);
+  Wire.write(0x80);
+  Wire.endTransmission();
+  
   // Enable Slave I2C bypass
   Wire.beginTransmission(0x68);
   Wire.write(55);
