@@ -2,6 +2,8 @@
 
 uint32_t meas_time;
 volatile bool data_ready;
+int16_t mag_sens_adj_x, mag_sens_adj_y, mag_sens_adj_z;
+
 
 // CRC-8-CCITT lookup table for the polynomial x^8 + x^2 + x^1 + x^0 (0x07)
 static const PROGMEM uint8_t crc8_table[] = {
@@ -33,6 +35,15 @@ static inline uint8_t crc8_byte(uint8_t crc, uint8_t data) {
   return pgm_read_byte(crc8_table + (crc ^ data));
 }
 
+static inline int16_t mag_adjust(int16_t value, int16_t sens_adj) {
+  if (value >= 4095)
+    return 32767;
+  else if (value <= -4095)
+    return -32768;
+  else  
+    return value + ((value * sens_adj) >> 8);
+}
+
 void setup() {
   Serial.begin(250000);
   Wire.begin();
@@ -46,6 +57,8 @@ void setup() {
   Wire.write(107);
   Wire.write(0x80);
   Wire.endTransmission();
+
+  delay(100);
   
   // Enable Slave I2C bypass
   Wire.beginTransmission(0x68);
@@ -70,8 +83,37 @@ void setup() {
   Wire.write(0x0A);
   Wire.write(0x01);
   Wire.endTransmission();
+
+  // Wait for conversion to finish
   delay(10);
 
+  // Set AK8975 fuse ROM access mode
+  Wire.beginTransmission(0x0C);
+  Wire.write(0x0A);
+  Wire.write(0x0F);
+  Wire.endTransmission();
+
+  // Read AK8975 sensitivity adjustment data
+  Wire.beginTransmission(0x0C);
+  Wire.write(0x10);
+  Wire.endTransmission(true);
+  Wire.requestFrom(0x0C, 3);
+
+  uint8_t asax, asay, asaz;
+  asax = Wire.read();
+  asay = Wire.read();
+  asaz = Wire.read();
+  
+  mag_sens_adj_x = asax - 128;
+  mag_sens_adj_y = asay - 128;
+  mag_sens_adj_z = asaz - 128;
+
+  // Set AK8975 back to power-down mode
+  Wire.beginTransmission(0x0C);
+  Wire.write(0x0A);
+  Wire.write(0x0F);
+  Wire.endTransmission();
+  
   // Set MPU sample rate
   Wire.beginTransmission(0x68);
   Wire.write(25);
@@ -100,9 +142,15 @@ void loop() {
 
   int16_t ax, ay, az, gx, gy, gz, temp, mx, my, mz;
 
+  // Get the magnetometer data
   mx = Wire.read() | Wire.read() << 8;
   my = Wire.read() | Wire.read() << 8;
   mz = Wire.read() | Wire.read() << 8;
+
+  // Adjust the magnetometer sensitivity
+  mx = mag_adjust(mx, mag_sens_adj_x);
+  my = mag_adjust(my, mag_sens_adj_y);
+  mz = mag_adjust(mz, mag_sens_adj_z);
 
   // Trigger AK8975 measurement
   Wire.beginTransmission(0x0C);
